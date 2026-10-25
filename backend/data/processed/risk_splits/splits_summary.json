@@ -1,0 +1,8 @@
+{
+  "train_size": 124,
+  "val_size": 29,
+  "test_size": 23,
+  "total_size": 176,
+  "train_cutoff_timestamp": "2025-05-13T01:30:27+00:00",
+  "val_cutoff_timestamp": "2026-02-12T21:07:50+00:00"
+}

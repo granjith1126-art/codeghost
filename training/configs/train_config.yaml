@@ -1,0 +1,19 @@
+# SFT Training Hyperparameters for Qwen2.5-Coder-7B LoRA
+base_model_id: "Qwen/Qwen2.5-Coder-7B-Instruct"
+dataset_dir: "backend/data/processed/risk_splits"
+output_dir: "training/checkpoints/qwen_lora"
+max_seq_length: 2048
+learning_rate: 2.0e-4
+num_train_epochs: 3
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 2
+gradient_accumulation_steps: 4
+warmup_ratio: 0.05
+logging_steps: 5
+eval_steps: 20
+save_steps: 50
+seed: 42
+bf16: true
+load_in_4bit: true
+use_wandb: false
+wandb_project: "codeghost-risk-scoring"
