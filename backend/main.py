@@ -14,6 +14,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# Ensure Windows console encoding does not crash on unicode characters
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from rich.columns import Columns
 from rich.console import Console
 from rich.logging import RichHandler
@@ -448,7 +456,7 @@ def print_explanation_report(exp: RiskExplanation) -> None:
 
     if exp.vulnerable_patterns:
         pat_panel = Panel(
-            "\n".join([f"• {p}" for p in exp.vulnerable_patterns]),
+            "\n".join([f"* {p}" for p in exp.vulnerable_patterns]),
             title="Identified Code Hazards & Vulnerability Patterns",
             border_style="red",
         )
@@ -457,7 +465,7 @@ def print_explanation_report(exp: RiskExplanation) -> None:
 
     if exp.mitigation_strategies:
         mit_panel = Panel(
-            "\n".join([f"✓ {m}" for m in exp.mitigation_strategies]),
+            "\n".join([f"[+] {m}" for m in exp.mitigation_strategies]),
             title="Actionable Mitigation Strategies",
             border_style="green",
         )
@@ -487,7 +495,7 @@ def print_fixes_report(verified_fixes: List[VerifiedFix]) -> None:
         c = vf.candidate
         sb = vf.sandbox_result
         strat_str = c.strategy.value if hasattr(c.strategy, "value") else str(c.strategy)
-        status_str = "[green]✓ PASSED[/green]" if vf.is_verified else "[red]✗ FAILED[/red]"
+        status_str = "[green]PASSED[/green]" if vf.is_verified else "[red]FAILED[/red]"
         syntax_str = "[green]VALID[/green]" if vf.syntax_valid else "[red]SYNTAX ERROR[/red]"
         table.add_row(
             c.fix_id,
