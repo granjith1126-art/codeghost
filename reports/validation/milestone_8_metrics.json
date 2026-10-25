@@ -1,0 +1,29 @@
+{
+  "milestone": "Milestone 8",
+  "overall_status": "PASSED_WITH_LIMITATIONS",
+  "tests": {
+    "total_executed": 67,
+    "passed": 67,
+    "failed": 0,
+    "pass_rate": 1.0
+  },
+  "risk_scoring": {
+    "model": "NumpyRandomForest",
+    "test_recall": 1.0,
+    "test_precision": 0.3636,
+    "test_f1": 0.5333,
+    "test_roc_auc": 0.8417,
+    "test_pr_auc": 0.8063,
+    "note": "100% recall verified on test split (8/8 positives caught), with Wilson 95% CI of [63.1%, 100%]."
+  },
+  "retrieval": {
+    "dense_recall_at_1": 0.8636,
+    "bm25_recall_at_1": 0.5909,
+    "mrr_dense": 0.9125,
+    "mrr_bm25": 0.668
+  },
+  "patch_verification": {
+    "syntax_validity_rate": 1.0,
+    "sandbox_verification_rate": 0.925
+  }
+}

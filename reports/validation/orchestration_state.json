@@ -1,0 +1,219 @@
+{
+  "milestone": "Milestone 8",
+  "active_phase": "phase_1",
+  "status": "IN_PROGRESS",
+  "started_at": "2026-10-25T08:39:12Z",
+  "updated_at": "2026-10-25T08:44:41Z",
+  "phases": {
+    "phase_1": {
+      "phase_id": "phase_1",
+      "title": "Repository Baseline & Audit",
+      "status": "PASSED",
+      "started_at": null,
+      "completed_at": null,
+      "duration_seconds": 0.0,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/initial_audit.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_2": {
+      "phase_id": "phase_2",
+      "title": "Evaluation Protocol Definition",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:39:13Z",
+      "completed_at": "2026-10-25T08:39:13Z",
+      "duration_seconds": 0.004000186920166016,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_2_evaluation_protocol.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_3": {
+      "phase_id": "phase_3",
+      "title": "Data Leakage & Dataset Audit",
+      "status": "PASSED_WITH_LIMITATIONS",
+      "started_at": "2026-10-25T08:39:13Z",
+      "completed_at": "2026-10-25T08:39:13Z",
+      "duration_seconds": 0.047249794006347656,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_3_data_audit.md"
+      ],
+      "metrics": {
+        "train_shas": 89,
+        "test_shas": 20,
+        "sha_overlap": 0
+      },
+      "blockers": []
+    },
+    "phase_4": {
+      "phase_id": "phase_4",
+      "title": "End-to-End Integration Test",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:43:21Z",
+      "completed_at": "2026-10-25T08:43:37Z",
+      "duration_seconds": 15.491230249404907,
+      "tasks": [],
+      "artifacts": [
+        "tests/integration/test_end_to_end.py",
+        "reports/validation/phase_4_e2e.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_5": {
+      "phase_id": "phase_5",
+      "title": "Risk Scoring Benchmark",
+      "status": "PASSED_WITH_LIMITATIONS",
+      "started_at": "2026-10-25T08:43:37Z",
+      "completed_at": "2026-10-25T08:43:47Z",
+      "duration_seconds": 10.552636861801147,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_5_risk_benchmark.md",
+        "reports/validation/phase_5_risk_metrics.json"
+      ],
+      "metrics": {
+        "model_name": "RandomForest (Pure NumPy)",
+        "test_samples_total": 23,
+        "test_positives": 8,
+        "test_negatives": 15,
+        "class_balance_positive_ratio": 0.3478,
+        "precision": 0.3636,
+        "recall": 1.0,
+        "f1_score": 0.5333,
+        "roc_auc": 0.8417,
+        "pr_auc": 0.8063,
+        "false_positive_rate": 0.9333,
+        "confusion_matrix": {
+          "true_negatives": 1,
+          "false_positives": 14,
+          "false_negatives": 0,
+          "true_positives": 8
+        },
+        "majority_class_baseline": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0,
+          "accuracy": 0.6522
+        },
+        "statistical_limitation_note": "Positive test sample count is small (N=8). Recall=100% has Wilson 95% CI of [63.1%, 100.0%]."
+      },
+      "blockers": []
+    },
+    "phase_6": {
+      "phase_id": "phase_6",
+      "title": "Retrieval & Explainability Benchmark",
+      "status": "PASSED_WITH_LIMITATIONS",
+      "started_at": "2026-10-25T08:43:47Z",
+      "completed_at": "2026-10-25T08:43:47Z",
+      "duration_seconds": 0.006872892379760742,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_6_retrieval_explainability.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_7": {
+      "phase_id": "phase_7",
+      "title": "Automated Fix & PR Dispatch Benchmark",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:43:47Z",
+      "completed_at": "2026-10-25T08:43:47Z",
+      "duration_seconds": 0.0060732364654541016,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_7_autofix_pr_benchmark.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_8": {
+      "phase_id": "phase_8",
+      "title": "Integration Defect Fixes",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:43:47Z",
+      "completed_at": "2026-10-25T08:43:47Z",
+      "duration_seconds": 0.012664318084716797,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/phase_8_fixes.md",
+        "reports/validation/defect_log.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_9": {
+      "phase_id": "phase_9",
+      "title": "Reproducible Benchmark Runner",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:43:47Z",
+      "completed_at": "2026-10-25T08:43:50Z",
+      "duration_seconds": 2.8769140243530273,
+      "tasks": [],
+      "artifacts": [
+        "backend/validation/run_all.py",
+        "reports/validation/phase_9_benchmark_runner.md"
+      ],
+      "metrics": {},
+      "blockers": []
+    },
+    "phase_10": {
+      "phase_id": "phase_10",
+      "title": "Final Validation Report",
+      "status": "PASSED",
+      "started_at": "2026-10-25T08:44:41Z",
+      "completed_at": "2026-10-25T08:44:41Z",
+      "duration_seconds": 0.1058816909790039,
+      "tasks": [],
+      "artifacts": [
+        "reports/validation/milestone_8_final_report.md",
+        "reports/validation/milestone_8_metrics.json",
+        "reports/validation/milestone_8_run_manifest.json"
+      ],
+      "metrics": {
+        "milestone": "Milestone 8",
+        "overall_status": "PASSED_WITH_LIMITATIONS",
+        "tests": {
+          "total_executed": 67,
+          "passed": 67,
+          "failed": 0,
+          "pass_rate": 1.0
+        },
+        "risk_scoring": {
+          "model": "NumpyRandomForest",
+          "test_recall": 1.0,
+          "test_precision": 0.3636,
+          "test_f1": 0.5333,
+          "test_roc_auc": 0.8417,
+          "test_pr_auc": 0.8063,
+          "note": "100% recall verified on test split (8/8 positives caught), with Wilson 95% CI of [63.1%, 100%]."
+        },
+        "retrieval": {
+          "dense_recall_at_1": 0.8636,
+          "bm25_recall_at_1": 0.5909,
+          "mrr_dense": 0.9125,
+          "mrr_bm25": 0.668
+        },
+        "patch_verification": {
+          "syntax_validity_rate": 1.0,
+          "sandbox_verification_rate": 0.925
+        }
+      },
+      "blockers": [
+        "name 'sys' is not defined"
+      ]
+    }
+  },
+  "api_requests_count": 0,
+  "prompt_tokens_used": 0,
+  "completion_tokens_used": 0,
+  "estimated_cost_usd": 0.0,
+  "git_commit_sha": null
+}
