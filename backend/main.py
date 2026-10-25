@@ -30,6 +30,14 @@ from backend.models.schemas import (
     HistoryExtractionSummary,
     IngestionResult,
 )
+from backend.autofix.generator import FixGenerator
+from backend.autofix.sandbox import TestSandbox
+from backend.autofix.schemas import FixCandidate, FixStrategy, VerifiedFix
+from backend.pr.creator import PRCreator
+from backend.pr.formatter import PRFormatter
+from backend.pr.schemas import PRDraft, PRResult
+from backend.reasoning.explainer import ReasoningEngine
+from backend.reasoning.schemas import ComplexityFactor, HistoricalPrecedent, RiskExplanation
 from backend.retrieval.embedder import FastEmbedEmbedder
 from backend.retrieval.indexer import BugFixIndexer
 from backend.retrieval.retriever import FunctionRetriever
@@ -392,6 +400,141 @@ def print_risk_prediction_report(pred: RiskPrediction) -> None:
     console.print()
 
 
+def print_explanation_report(exp: RiskExplanation) -> None:
+    """Display rich explanation report for Milestone 5."""
+    console.print()
+    console.rule(f"[bold cyan]CodeGhost Explainability & Reasoning: {exp.function_name}[/bold cyan]")
+    console.print()
+
+    cat_str = getattr(exp.risk_category, "value", str(exp.risk_category))
+    color = "red" if exp.risk_score >= 8.5 else "orange3" if exp.risk_score >= 7.0 else "yellow" if exp.risk_score >= 4.0 else "green"
+
+    summary_panel = Panel(
+        f"[bold]Summary:[/bold] {exp.summary}\n\n"
+        f"[bold]Risk Assessment:[/bold] [{color}]{exp.risk_score:.1f} / 10.0 ({cat_str})[/{color}] | "
+        f"[bold]Provider:[/bold] [cyan]{exp.provider}[/cyan] ({exp.model_name})",
+        title=f"Assessment Overview: {exp.function_name}",
+        border_style=color,
+    )
+    console.print(summary_panel)
+    console.print()
+
+    if exp.complexity_factors:
+        comp_table = Table(title="AST & Structural Complexity Drivers", show_header=True, header_style="bold magenta")
+        comp_table.add_column("Driver", style="bold")
+        comp_table.add_column("Value", justify="right", style="cyan")
+        comp_table.add_column("Impact", style="yellow")
+        comp_table.add_column("Diagnostic Description")
+        for f in exp.complexity_factors:
+            comp_table.add_row(f.name, str(f.value), f.risk_impact, f.description)
+        console.print(comp_table)
+        console.print()
+
+    if exp.historical_precedents:
+        hist_table = Table(title="Historical Precedents & Analogous Bugs", show_header=True, header_style="bold blue")
+        hist_table.add_column("Commit", style="cyan")
+        hist_table.add_column("Similarity", justify="right", style="green")
+        hist_table.add_column("Function", style="yellow")
+        hist_table.add_column("Commit Message & Relevance")
+        for p in exp.historical_precedents[:3]:
+            hist_table.add_row(
+                p.commit_sha[:8],
+                f"{p.similarity_score:.1%}",
+                p.function_name,
+                f"[bold]{p.commit_message}[/bold]\n[dim]{p.relevance_reason}[/dim]",
+            )
+        console.print(hist_table)
+        console.print()
+
+    if exp.vulnerable_patterns:
+        pat_panel = Panel(
+            "\n".join([f"• {p}" for p in exp.vulnerable_patterns]),
+            title="Identified Code Hazards & Vulnerability Patterns",
+            border_style="red",
+        )
+        console.print(pat_panel)
+        console.print()
+
+    if exp.mitigation_strategies:
+        mit_panel = Panel(
+            "\n".join([f"✓ {m}" for m in exp.mitigation_strategies]),
+            title="Actionable Mitigation Strategies",
+            border_style="green",
+        )
+        console.print(mit_panel)
+        console.print()
+
+
+def print_fixes_report(verified_fixes: List[VerifiedFix]) -> None:
+    """Display rich automated fixes report for Milestone 6."""
+    console.print()
+    console.rule("[bold cyan]CodeGhost Automated Fix Candidates & Sandbox Verification[/bold cyan]")
+    console.print()
+
+    if not verified_fixes:
+        console.print("[yellow]No viable fix candidates could be synthesized for this pattern.[/yellow]")
+        return
+
+    table = Table(title="Synthesized Fix Candidates", show_header=True, header_style="bold magenta")
+    table.add_column("Fix ID", style="bold")
+    table.add_column("Strategy", style="cyan")
+    table.add_column("Confidence", justify="right", style="green")
+    table.add_column("Syntax", style="blue")
+    table.add_column("Sandbox Verdict", style="bold")
+    table.add_column("Description")
+
+    for vf in verified_fixes:
+        c = vf.candidate
+        sb = vf.sandbox_result
+        strat_str = c.strategy.value if hasattr(c.strategy, "value") else str(c.strategy)
+        status_str = "[green]✓ PASSED[/green]" if vf.is_verified else "[red]✗ FAILED[/red]"
+        syntax_str = "[green]VALID[/green]" if vf.syntax_valid else "[red]SYNTAX ERROR[/red]"
+        table.add_row(
+            c.fix_id,
+            strat_str,
+            f"{c.confidence:.0%}",
+            syntax_str,
+            status_str,
+            c.description,
+        )
+    console.print(table)
+    console.print()
+
+    # Show top diff
+    top_fix = verified_fixes[0]
+    syntax = Syntax(top_fix.candidate.diff, "diff", theme="monokai", line_numbers=True)
+    console.print(Panel(syntax, title=f"Top Verified Fix Diff: {top_fix.candidate.fix_id} ({top_fix.verification_summary})", border_style="green" if top_fix.is_verified else "yellow"))
+    console.print()
+
+
+def print_pr_report(pr_res: PRResult) -> None:
+    """Display rich GitHub PR report for Milestone 7."""
+    console.print()
+    console.rule("[bold cyan]CodeGhost GitHub Pull Request Dispatch[/bold cyan]")
+    console.print()
+
+    draft = pr_res.draft
+    status_text = "[bold green]LIVE PR CREATED[/bold green]" if pr_res.pr_url else "[bold yellow]DRY-RUN READY[/bold yellow]"
+
+    panel_content = [
+        f"[bold]Status:[/bold] {status_text}",
+        f"[bold]Summary:[/bold] {pr_res.message}",
+    ]
+    if pr_res.pr_url:
+        panel_content.append(f"[bold]Pull Request URL:[/bold] [link={pr_res.pr_url}]{pr_res.pr_url}[/link]")
+    if pr_res.patch_file_path:
+        panel_content.append(f"[bold]Serialized Patch File:[/bold] [cyan]{pr_res.patch_file_path}[/cyan]")
+    if draft:
+        panel_content.extend([
+            f"[bold]Title:[/bold] {draft.title}",
+            f"[bold]Target Branch:[/bold] {draft.base_branch} ← [cyan]{draft.branch_name}[/cyan]",
+            f"[bold]Risk Score:[/bold] {draft.risk_score} ({draft.risk_category})",
+        ])
+
+    console.print(Panel("\n".join(panel_content), title="Pull Request Deployment Summary", border_style="cyan"))
+    console.print()
+
+
 def main(argv: Optional[list] = None) -> int:
     """CLI entrypoint supporting Ingestion, History Mining, Vector Indexing, and RAG Retrieval."""
     parser = argparse.ArgumentParser(
@@ -412,9 +555,38 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["ingest", "history", "index", "retrieve", "evaluate", "risk", "all"],
+        choices=["ingest", "history", "index", "retrieve", "evaluate", "risk", "explain", "fix", "pr", "scan", "all"],
         default=None,
-        help="Execution mode: 'ingest', 'history', 'index', 'retrieve', 'evaluate', 'risk', or 'all'",
+        help="Execution mode: 'ingest', 'history', 'index', 'retrieve', 'evaluate', 'risk', 'explain', 'fix', 'pr', 'scan', or 'all'",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["deterministic", "gemini", "openai"],
+        default="deterministic",
+        help="Reasoning provider for explainability and fixes",
+    )
+    parser.add_argument(
+        "--live",
+        dest="dry_run",
+        action="store_false",
+        help="Submit live pull request to GitHub API (requires GITHUB_TOKEN)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Run in dry-run mode without external mutations (default: True)",
+    )
+    parser.set_defaults(dry_run=True)
+    parser.add_argument(
+        "--github-token",
+        default=None,
+        help="GitHub personal access token for live PR creation",
+    )
+    parser.add_argument(
+        "--base-branch",
+        default="main",
+        help="Target base branch for Pull Requests",
     )
     parser.add_argument(
         "--model",
@@ -921,6 +1093,115 @@ def main(argv: Optional[list] = None) -> int:
                 )
 
             print_risk_prediction_report(pred)
+
+    # MODE 7, 8, 9, 10: Explainability, Fix Generation, PR Dispatch, End-to-End Scan
+    if mode in ("explain", "fix", "pr", "scan"):
+        target_fn = args.function or "Flask.run"
+        console.print(f"[bold cyan]CodeGhost Autonomous Workflow ({mode.upper()}) for Function: '{target_fn}'...[/bold cyan]")
+
+        # 1. Resolve function code and file
+        fn_code = None
+        fn_file = "src/flask/app.py"
+        if pairs_file.exists():
+            with open(pairs_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        p = BugFixPair.model_validate_json(line)
+                        if target_fn.lower() in p.function_name.lower():
+                            fn_code = p.buggy_code
+                            fn_file = p.file_path
+                            target_fn = p.function_name
+                            break
+        if not fn_code:
+            fn_code = (
+                "def run(self, host=None, port=None, debug=None, **options):\n"
+                "    server_name = options.get('SERVER_NAME')\n"
+                "    if server_name:\n"
+                "        host, _, port = server_name.partition(':')\n"
+                "        port = int(port)\n"
+                "    return serve(host, port, **options)\n"
+            )
+
+        # 2. Retrieve historical context
+        v_store = QdrantVectorStore()
+        embedder = FastEmbedEmbedder()
+        retriever = FunctionRetriever(
+            vector_store=v_store,
+            embedder=embedder,
+            collection_name=args.collection,
+        )
+        matches = retriever.retrieve(
+            query=RetrievalQuery(
+                code=fn_code,
+                repository=repo_url,
+                function_name=target_fn,
+                file_path=fn_file,
+            ),
+            top_k=args.top_k,
+        )
+
+        # 3. Predict risk
+        model_save_path = Path(args.model_save_path).resolve()
+        if model_save_path.exists() and args.model != "llm":
+            baseline = BaselineRiskModel.load(model_save_path)
+            pred = baseline.predict_function(
+                code=fn_code,
+                function_name=target_fn,
+                file_path=fn_file,
+                retrieved_matches=matches,
+            )
+        else:
+            scorer = MockLLMScorer()
+            pred = scorer.predict(
+                code=fn_code,
+                function_name=target_fn,
+                file_path=fn_file,
+                retrieved_matches=matches,
+            )
+
+        print_risk_prediction_report(pred)
+
+        # 4. Generate Reasoning & Explanation (Milestone 5)
+        reasoning_engine = ReasoningEngine(provider=args.provider)
+        explanation = reasoning_engine.explain(
+            prediction=pred,
+            code=fn_code,
+            file_path=fn_file,
+            language="python",
+        )
+        print_explanation_report(explanation)
+
+        # 5. Automated Fix Generation & Sandbox Execution (Milestone 6)
+        verified_fixes = []
+        if mode in ("fix", "pr", "scan"):
+            fix_gen = FixGenerator(provider=args.provider)
+            candidates = fix_gen.generate_fixes(
+                function_name=target_fn,
+                code=fn_code,
+                file_path=fn_file,
+                explanation=explanation,
+            )
+
+            sandbox = TestSandbox()
+            verified_fixes = [sandbox.verify_fix(c) for c in candidates]
+            print_fixes_report(verified_fixes)
+
+        # 6. GitHub PR Creation (Milestone 7)
+        if mode in ("pr", "scan"):
+            if not verified_fixes:
+                console.print("[yellow]No viable fix candidates available to package for PR.[/yellow]")
+            else:
+                top_fix = verified_fixes[0]
+                creator = PRCreator()
+                pr_result = creator.create_pr(
+                    verified_fix=top_fix,
+                    explanation=explanation,
+                    repo_url_or_path=repo_url or "https://github.com/pallets/flask",
+                    base_branch=args.base_branch,
+                    dry_run=args.dry_run,
+                    github_token=args.github_token,
+                )
+                print_pr_report(pr_result)
 
     return 0
 

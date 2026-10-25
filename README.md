@@ -236,13 +236,89 @@ python -m backend.main --mode risk --function Flask.run
 
 ---
 
+## Milestone 5: LLM Reasoning & Explainability
+
+Translate risk scores, AST structural complexity drivers, and retrieved historical bug precedents into comprehensive, human-interpretable technical explanations:
+
+```powershell
+# Run explainability on a target function
+python -m backend.main --mode explain --function Flask.run
+```
+
+- **AST Complexity Drivers**: Evaluates Cyclomatic Complexity, Max Nesting Depth, Function Length, and Missing Error Handling.
+- **Historical Analogies**: Correlates target code with past commit SHAs, author messages, and syntax diffs.
+- **Vulnerability Patterns**: Highlights concrete hazards (e.g., host/port colon splitting without bracketed IPv6 checks, unshielded type casting).
+- **Actionable Mitigations**: Proposes exact architectural refactorings.
+
+---
+
+## Milestone 6: Automated Fix Generation & Test Sandbox Execution
+
+Synthesize candidate bug fixes and verify them inside an isolated temporary execution sandbox against automated test suites:
+
+```powershell
+# Generate candidate fixes and verify them in sandbox
+python -m backend.main --mode fix --function Flask.run
+```
+
+- **Fix Strategies**:
+  - `historical_analogy`: Directly adapts bug resolutions from repository git history.
+  - `defensive_guard`: Injects input validation, null checks, and safe dict `.get()`.
+  - `exception_shield`: Wraps risky type casts and external calls in `try/except`.
+  - `bounds_check`: Enforces non-empty boundary checks prior to indexing.
+- **Isolated Execution Sandbox**: Executes candidate patches in temporary directories with `pytest` subprocess isolation to ensure zero syntax errors or regressions.
+
+---
+
+## Milestone 7: GitHub PR Creation & Human-in-the-Loop Review
+
+Package verified bug fixes into complete GitHub Pull Requests with detailed risk assessments, historical citations, and review checklists:
+
+```powershell
+# 1. Dry-run PR creation (generates local branch, diff, and serializes .patch file)
+python -m backend.main --mode pr --function Flask.run --dry-run
+
+# 2. Live PR submission to GitHub
+python -m backend.main --mode pr --function Flask.run --live --github-token <YOUR_TOKEN>
+```
+
+---
+
+## Autonomous End-to-End Workflow (`--mode scan`)
+
+Execute the complete autonomous CodeGhost pipeline from end to end:
+
+```powershell
+python -m backend.main --mode scan --function Flask.run
+```
+
+1. **Retrieval**: Searches Qdrant vector database for nearest historical defect precedents.
+2. **Risk Scoring**: Evaluates calibrated risk probability ($p \in [0.0, 1.0]$) and score (1–10).
+3. **Reasoning**: Synthesizes AST complexity factors and grounded vulnerability explanations.
+4. **Fix Generation**: Formulates syntax-verified candidate patches.
+5. **Sandbox Verification**: Runs pytest in an isolated sandbox.
+6. **PR Packaging**: Assembles ready-to-merge Pull Request draft and serialized patch.
+
+---
+
+## Running Tests
+
+Execute the complete pytest test suite (67 tests across all 7 milestones):
+
+```bash
+pytest tests/ -q
+```
+
+---
+
 ## Roadmap
 
 - [x] **Milestone 1**: Repository Ingestion & AST Extraction (Tree-sitter, Git, JSONL)
 - [x] **Milestone 2**: Historical Bug Extraction (Buggy/fixed function pairs from git history)
 - [x] **Milestone 3**: Function Embeddings & Vector Database Indexing (FastEmbed, Qdrant, BM25 baseline)
 - [x] **Milestone 4**: Historical Risk Scoring Model (Classical ML Baseline, Qwen2.5-Coder LoRA pipeline)
-- [ ] **Milestone 5**: LLM Reasoning & Explainability (Preserving retrieved history & feature evidence)
-- [ ] **Milestone 6**: Automated Fix Generation & Test Sandbox Execution
-- [ ] **Milestone 7**: GitHub PR Creation & Human-in-the-Loop Review
+- [x] **Milestone 5**: LLM Reasoning & Explainability (Preserving retrieved history & feature evidence)
+- [x] **Milestone 6**: Automated Fix Generation & Test Sandbox Execution
+- [x] **Milestone 7**: GitHub PR Creation & Human-in-the-Loop Review
+
 

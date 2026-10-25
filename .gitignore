@@ -49,6 +49,7 @@ htmlcov/
 backend/data/raw/
 data/raw/
 backend/data/qdrant/
+backend/data/patches/*.patch
 *.jsonl
 
 # Environment variables
