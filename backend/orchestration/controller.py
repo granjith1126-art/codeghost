@@ -97,6 +97,10 @@ def main(argv=None) -> int:
             return 1
         print(f">>> {pid.upper()} COMPLETED SUCCESSFULLY.")
 
+    if not state_store.get_next_incomplete_phase():
+        state_store.state.status = "COMPLETED"
+        state_store.save()
+
     reporter.print_status()
     print("\n[SUCCESS] Milestone 8 Autonomous Validation Completed!")
     return 0

@@ -33,6 +33,7 @@ class OrchestrationConfig:
     max_cost_usd: float = 5.00
     per_command_timeout_seconds: float = 60.0
     max_repair_attempts_per_task: int = 3
+    max_review_retries: int = 3
     max_consecutive_failures: int = 3
     max_changed_files_per_task: int = 10
     max_patch_size_bytes: int = 100_000

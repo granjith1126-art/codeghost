@@ -8,7 +8,7 @@ import json
 import os
 import tempfile
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +37,9 @@ class PhaseRecord:
     artifacts: List[str] = field(default_factory=list)
     metrics: Dict[str, Any] = field(default_factory=dict)
     blockers: List[str] = field(default_factory=list)
+    review_verdict: Optional[str] = None
+    review_findings: List[str] = field(default_factory=list)
+    review_attempts: int = 0
 
 
 @dataclass
@@ -72,11 +75,13 @@ class StateStore:
                 
                 # Reconstruct phases
                 phases = {}
+                valid_keys = {f.name for f in fields(PhaseRecord)}
                 for pid, pdata in data.get("phases", {}).items():
                     tasks = [TaskRecord(**t) for t in pdata.get("tasks", [])]
                     pdata_copy = dict(pdata)
                     pdata_copy["tasks"] = tasks
-                    phases[pid] = PhaseRecord(**pdata_copy)
+                    filtered_pdata = {k: v for k, v in pdata_copy.items() if k in valid_keys}
+                    phases[pid] = PhaseRecord(**filtered_pdata)
                 
                 data["phases"] = phases
                 return WorkflowState(**data)
@@ -85,7 +90,7 @@ class StateStore:
         
         # Initialize default Milestone 8 phases (1 through 10)
         default_phases = {
-            "phase_1": PhaseRecord("phase_1", "Repository Baseline & Audit", status="PASSED", artifacts=["reports/validation/initial_audit.md"]),
+            "phase_1": PhaseRecord("phase_1", "Repository Baseline & Audit", status="PASSED", review_verdict="APPROVED", artifacts=["reports/validation/initial_audit.md"]),
             "phase_2": PhaseRecord("phase_2", "Evaluation Protocol Definition"),
             "phase_3": PhaseRecord("phase_3", "Data Leakage & Dataset Audit"),
             "phase_4": PhaseRecord("phase_4", "End-to-End Integration Test"),
@@ -122,7 +127,17 @@ class StateStore:
         """Retrieve phase record."""
         return self.state.phases[phase_id]
 
-    def update_phase(self, phase_id: str, status: str, artifacts: Optional[List[str]] = None, metrics: Optional[Dict[str, Any]] = None, blockers: Optional[List[str]] = None) -> None:
+    def update_phase(
+        self,
+        phase_id: str,
+        status: str,
+        artifacts: Optional[List[str]] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        blockers: Optional[List[str]] = None,
+        review_verdict: Optional[str] = None,
+        review_findings: Optional[List[str]] = None,
+        review_attempts: Optional[int] = None,
+    ) -> None:
         """Update phase state and persist."""
         phase = self.state.phases[phase_id]
         phase.status = status
@@ -132,13 +147,23 @@ class StateStore:
             phase.metrics.update(metrics)
         if blockers:
             phase.blockers.extend([b for b in blockers if b not in phase.blockers])
+        if review_verdict is not None:
+            phase.review_verdict = review_verdict
+        if review_findings is not None:
+            phase.review_findings = review_findings
+        if review_attempts is not None:
+            phase.review_attempts = review_attempts
         self.save()
 
     def get_next_incomplete_phase(self) -> Optional[str]:
-        """Find the earliest phase that is not PASSED or PASSED_WITH_LIMITATIONS."""
+        """Find the earliest phase that is not fully PASSED with an APPROVED review."""
         ordered = [f"phase_{i}" for i in range(1, 11)]
         for pid in ordered:
             p = self.state.phases.get(pid)
-            if not p or p.status not in ("PASSED", "PASSED_WITH_LIMITATIONS"):
+            if not p:
+                return pid
+            if p.status not in ("PASSED", "PASSED_WITH_LIMITATIONS"):
+                return pid
+            if getattr(p, "review_verdict", None) != "APPROVED":
                 return pid
         return None

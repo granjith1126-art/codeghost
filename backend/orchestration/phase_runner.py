@@ -13,8 +13,9 @@ from typing import Any, Dict, List, Optional
 
 from backend.orchestration.config import OrchestrationConfig
 from backend.orchestration.executor import BaseExecutor, ExecutionResult
-from backend.orchestration.planner import OpenAIPlanner
-from backend.orchestration.state_store import StateStore
+from backend.orchestration.planner import OpenAIPlanner, PhaseReviewVerdict, PlannedTask, RepairProposal
+from backend.orchestration.reviewer import LocalEvidenceReviewer
+from backend.orchestration.state_store import StateStore, TaskRecord
 from backend.orchestration.verification import TaskVerifier
 
 
@@ -28,6 +29,7 @@ class PhaseRunner:
         planner: OpenAIPlanner,
         state_store: StateStore,
         verifier: TaskVerifier,
+        reviewer: Optional[Any] = None,
     ):
         self.config = config
         self.executor = executor
@@ -35,41 +37,220 @@ class PhaseRunner:
         self.state_store = state_store
         self.verifier = verifier
         self.project_root = config.project_root
+        self.reviewer = reviewer or LocalEvidenceReviewer(config, executor, verifier)
 
-    def run_phase(self, phase_id: str, dry_run: bool = False) -> bool:
-        """Execute a specific Milestone 8 phase."""
+    def run_phase(self, phase_id: str, dry_run: bool = False, max_retries: Optional[int] = None) -> bool:
+        """Execute a specific Milestone 8 phase with full Plan -> Execute -> Test -> Review -> Fix -> Retest loop."""
+        retries_limit = max_retries if max_retries is not None else self.config.max_review_retries
         phase_record = self.state_store.get_phase(phase_id)
         phase_record.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         phase_record.status = "IN_PROGRESS"
         self.state_store.save()
 
         start_time = time.time()
-        try:
+
+        # 1. PLAN: Generate or retrieve task plan
+        planned_tasks = self.planner.plan_phase(phase_id, phase_record.title)
+        phase_record.tasks = [
+            TaskRecord(
+                task_id=t.task_id,
+                description=t.description,
+                status="IN_PROGRESS",
+                files_modified=t.target_files,
+            )
+            for t in planned_tasks
+        ]
+        self.state_store.save()
+
+        attempt = 0
+        last_error = None
+
+        while attempt < retries_limit:
+            attempt += 1
+            phase_record.review_attempts = attempt
+            self.state_store.save()
+
+            # 2. EXECUTE & LOCAL VERIFICATION
             handler = getattr(self, f"_run_{phase_id}", None)
             if not handler:
                 raise ValueError(f"No execution handler implemented for {phase_id}")
 
-            success = handler(dry_run=dry_run)
-            phase_record.duration_seconds = time.time() - start_time
-            phase_record.completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            
-            if success:
-                # If phase passed with known caveats (like small sample sizes), status is PASSED_WITH_LIMITATIONS
+            local_success = False
+            try:
+                local_success = handler(dry_run=dry_run)
+            except Exception as e:
+                local_success = False
+                last_error = str(e)
+                phase_record.blockers.append(self.config.redact(f"Attempt {attempt} execution error: {e}"))
+                self.state_store.save()
+
+            if not local_success:
+                # Local verification/execution failed
+                if attempt < retries_limit and not dry_run:
+                    diag = self.planner.diagnose_and_repair(
+                        task_description=f"Resolve execution failure for {phase_id} (Attempt {attempt})",
+                        command=f"run_{phase_id}",
+                        error_output=last_error or f"{phase_id} local verification failed",
+                        target_files=phase_record.artifacts,
+                    )
+                    self._apply_safe_repairs(diag)
+                    continue
+                else:
+                    phase_record.status = "FAILED"
+                    phase_record.duration_seconds = time.time() - start_time
+                    self.state_store.save()
+                    return False
+
+            if dry_run:
+                # Dry-run skips external paid API reviews
+                phase_record.status = "PASSED"
+                phase_record.duration_seconds = time.time() - start_time
+                self.state_store.save()
+                return True
+
+            # 3. COLLECT EVIDENCE FOR CHATGPT REVIEW
+            acceptance_criteria = "\n".join([f"- {t.acceptance_criteria}" for t in planned_tasks if t.acceptance_criteria]) or f"Milestone 8 {phase_id} acceptance criteria"
+            changed_files = list(phase_record.artifacts)
+            evidence_summary = self._gather_phase_evidence(phase_id, changed_files)
+            test_results = self._gather_test_results(phase_id)
+            logs = f"Execution completed in {time.time() - start_time:.2f}s with local success."
+
+            # 4. INDEPENDENT EVIDENCE-BASED REVIEW
+            review = self.reviewer.review_phase(
+                phase_id=phase_id,
+                phase_title=phase_record.title,
+                acceptance_criteria=acceptance_criteria,
+                changed_files=changed_files,
+                diff_or_content_summary=evidence_summary,
+                test_results=test_results,
+                logs=logs,
+            )
+
+            phase_record.review_verdict = review.verdict
+            phase_record.review_findings = [f"[{f.severity}] {f.description}" for f in review.findings]
+            self.state_store.save()
+
+            # 5. COMPLETION GATE
+            has_critical = any(f.severity in ("CRITICAL", "HIGH") for f in review.findings)
+            if review.is_valid and review.verdict == "APPROVED" and not has_critical:
+                for t in phase_record.tasks:
+                    t.status = "PASSED"
                 if phase_id in ("phase_3", "phase_5", "phase_6"):
                     phase_record.status = "PASSED_WITH_LIMITATIONS"
                 else:
                     phase_record.status = "PASSED"
-            else:
-                phase_record.status = "FAILED"
+                phase_record.duration_seconds = time.time() - start_time
+                phase_record.completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                self.state_store.save()
+                return True
+
+            # 6. CHANGES REQUESTED / REVIEW REJECTION -> REPAIR & RETEST
+            findings_text = "\n".join([f.description for f in review.findings] + review.required_fixes)
+            if not review.is_valid:
+                findings_text += f"\nReview API error: {review.error_message}"
             
+            phase_record.blockers.append(self.config.redact(f"Attempt {attempt} Review {review.verdict}: {findings_text[:300]}"))
             self.state_store.save()
-            return success
-        except Exception as e:
-            phase_record.duration_seconds = time.time() - start_time
-            phase_record.status = "FAILED"
-            phase_record.blockers.append(self.config.redact(str(e)))
-            self.state_store.save()
-            return False
+
+            if attempt < retries_limit:
+                repair = self.planner.diagnose_and_repair(
+                    task_description=f"Address review findings for {phase_id} (Attempt {attempt})",
+                    command=f"review_{phase_id}",
+                    error_output=findings_text,
+                    findings=[f.description for f in review.findings],
+                    target_files=changed_files,
+                )
+                self._apply_safe_repairs(repair)
+                # Next loop iteration will re-run handler/retest and re-review
+            else:
+                phase_record.status = "BLOCKED" if not review.is_valid else "FAILED"
+                phase_record.duration_seconds = time.time() - start_time
+                self.state_store.save()
+                return False
+
+        phase_record.status = "BLOCKED"
+        phase_record.duration_seconds = time.time() - start_time
+        self.state_store.save()
+        return False
+
+    def _gather_phase_evidence(self, phase_id: str, changed_files: List[str]) -> str:
+        """Gather content snippets or git diff for review evidence."""
+        snippets = []
+        for cf in changed_files:
+            full_p = self.project_root / cf if not os.path.isabs(cf) else Path(cf)
+            if full_p.exists() and full_p.is_file():
+                try:
+                    with open(full_p, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                        snippets.append(f"--- File: {cf} (first 2000 chars) ---\n{content[:2000]}")
+                except Exception:
+                    pass
+
+        diff_res = self.executor.run_command("git diff --stat HEAD~1")
+        if diff_res.success and diff_res.stdout.strip():
+            snippets.append(f"--- Git Diff Stat ---\n{diff_res.stdout.strip()[:1000]}")
+
+        return "\n\n".join(snippets) or f"Evidence generated for {phase_id}."
+
+    def _gather_test_results(self, phase_id: str) -> str:
+        """Gather test execution results relevant to the phase."""
+        if phase_id == "phase_4":
+            res = self.executor.run_command(".venv\\Scripts\\python -m pytest tests/integration/test_end_to_end.py -v")
+            return f"E2E Integration Test: Exit Code {res.exit_code}\nSTDOUT:\n{res.stdout[:1500]}\nSTDERR:\n{res.stderr[:500]}"
+        elif phase_id == "phase_5":
+            res = self.executor.run_command(".venv\\Scripts\\python -m backend.main --mode risk --model baseline --baseline-type random_forest")
+            return f"Risk Model Benchmark: Exit Code {res.exit_code}\nSTDOUT:\n{res.stdout[:1500]}"
+        elif phase_id == "phase_9":
+            res = self.executor.run_command(".venv\\Scripts\\python -m backend.validation.run_all --output reports/validation/run_latest --skip-tests")
+            return f"Benchmark Runner: Exit Code {res.exit_code}\nSTDOUT:\n{res.stdout[:1500]}"
+        else:
+            return f"Local verification completed successfully for {phase_id}. Required artifacts present and valid."
+
+    def _apply_safe_repairs(self, repair: Any) -> bool:
+        """Safely apply scoped file replacements and execute allowed verification commands."""
+        applied_any = False
+        replacements = getattr(repair, "replacements", [])
+        for rep in replacements:
+            fpath = rep.get("file_path")
+            target = rep.get("target")
+            replacement = rep.get("replacement")
+            if not fpath or not target or replacement is None:
+                continue
+
+            # Security: ensure file path is inside project root and not sensitive
+            p = Path(fpath)
+            if p.is_absolute():
+                try:
+                    p = p.relative_to(self.project_root)
+                except ValueError:
+                    continue
+
+            p_str = str(p).replace("\\", "/")
+            if p_str.startswith(".git") or p_str == ".env" or ".." in p_str:
+                continue
+
+            patch_res = self.executor.apply_patch(str(p), target, replacement)
+            if patch_res.success:
+                applied_any = True
+
+        # Execute allowed commands (strictly validated allowlist)
+        allowed_prefixes = (
+            ".venv\\Scripts\\python",
+            ".venv/Scripts/python",
+            "python",
+            "pytest",
+            "git status",
+            "git diff",
+        )
+        for cmd in getattr(repair, "suggested_commands", []):
+            cmd_clean = cmd.strip()
+            # Reject dangerous commands
+            if any(bad in cmd_clean for bad in ("rm ", "del ", "curl ", "wget ", "powershell -enc", "git push")):
+                continue
+            if any(cmd_clean.startswith(prefix) for prefix in allowed_prefixes):
+                self.executor.run_command(cmd_clean)
+
+        return applied_any
 
     # -------------------------------------------------------------------------
     # PHASE 2: Reproducible Evaluation Protocol

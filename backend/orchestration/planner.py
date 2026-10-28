@@ -26,11 +26,35 @@ class PlannedTask:
 
 
 @dataclass
+class ReviewFinding:
+    severity: str  # "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"
+    category: str  # "CORRECTNESS", "LEAKAGE", "PERFORMANCE", "SECURITY", "DOCUMENTATION"
+    description: str
+    evidence: str = ""
+    suggested_fix: str = ""
+
+
+@dataclass
+class PhaseReviewVerdict:
+    verdict: str  # "APPROVED" or "CHANGES_REQUESTED"
+    score: float = 0.0
+    acceptance_criteria_assessment: Dict[str, str] = field(default_factory=dict)
+    findings: List[ReviewFinding] = field(default_factory=list)
+    required_fixes: List[str] = field(default_factory=list)
+    remaining_risks: List[str] = field(default_factory=list)
+    raw_response: Optional[str] = None
+    is_valid: bool = True
+    reviewer_type: str = "openai"
+    error_message: Optional[str] = None
+
+
+@dataclass
 class RepairProposal:
     root_cause: str
     proposed_files: List[str] = field(default_factory=list)
     patch_instructions: Dict[str, str] = field(default_factory=dict)  # file_path -> instructions or code
     suggested_commands: List[str] = field(default_factory=list)
+    replacements: List[Dict[str, str]] = field(default_factory=list)  # list of {"file_path": ..., "target": ..., "replacement": ...}
 
 
 class OpenAIPlanner:
@@ -90,31 +114,189 @@ Return ONLY valid JSON with this exact schema:
         except Exception:
             return self._get_deterministic_phase_plan(phase_id)
 
-    def diagnose_and_repair(self, task_description: str, command: str, error_output: str) -> RepairProposal:
-        """Diagnose a command failure and propose a repair action."""
+    def review_phase(
+        self,
+        phase_id: str,
+        phase_title: str,
+        acceptance_criteria: str,
+        changed_files: List[str],
+        diff_or_content_summary: str,
+        test_results: str,
+        logs: str = "",
+    ) -> PhaseReviewVerdict:
+        """Perform genuine, independent code review using the OpenAI API.
+        
+        Evaluates artifacts, test results, logs, and acceptance criteria.
+        Returns a structured PhaseReviewVerdict (APPROVED or CHANGES_REQUESTED).
+        Never treats API failures or malformed responses as approval.
+        """
         if not self.client or not self.config.has_api_key:
-            return RepairProposal(
-                root_cause="Automated offline diagnosis: inspect error output and rerun test.",
-                suggested_commands=[command],
+            return PhaseReviewVerdict(
+                verdict="CHANGES_REQUESTED",
+                score=0.0,
+                is_valid=False,
+                error_message="OpenAI API client is not configured or API key is missing. Genuine review requires active API configuration.",
             )
 
-        prompt = f"""Task '{task_description}' failed.
-Command executed: {self.config.redact(command)}
-Error output:
-{self.config.redact(error_output[:2000])}
+        prompt = f"""You are CodeGhost's lead independent validation reviewer.
+Your responsibility is to strictly audit phase deliverables, code changes, test results, and compliance with specifications.
 
-Analyze the error, determine the root cause, and propose a specific repair.
-Return ONLY valid JSON with schema:
+Phase: {phase_id} - {phase_title}
+Acceptance Criteria:
+{acceptance_criteria}
+
+Changed Files:
+{json.dumps(changed_files)}
+
+Deliverables / Code / Diff Summary:
+{self.config.redact(diff_or_content_summary[:8000])}
+
+Test Execution Results:
+{self.config.redact(test_results[:4000])}
+
+Execution Logs:
+{self.config.redact(logs[:2000])}
+
+Audit Instructions:
+1. Verify each acceptance criterion.
+2. Ensure tests executed and passed without syntax or runtime failures.
+3. Check for data leakage, unvalidated assumptions, or regressions.
+4. If ALL criteria are satisfied and tests pass with no critical defects, verdict MUST be 'APPROVED'.
+5. If any test fails, critical requirement is missing, or severe risk exists, verdict MUST be 'CHANGES_REQUESTED'.
+
+Return ONLY valid JSON matching this schema:
 {{
-  "root_cause": "brief explanation",
-  "suggested_commands": ["list of commands to run to resolve or verify"]
+  "verdict": "APPROVED" | "CHANGES_REQUESTED",
+  "score": 8.5,
+  "acceptance_criteria_assessment": {{
+    "criterion_name": "MET"
+  }},
+  "findings": [
+    {{
+      "severity": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO",
+      "category": "CORRECTNESS" | "LEAKAGE" | "PERFORMANCE" | "SECURITY" | "DOCUMENTATION",
+      "description": "string",
+      "evidence": "string",
+      "suggested_fix": "string"
+    }}
+  ],
+  "required_fixes": ["string"],
+  "remaining_risks": ["string"]
 }}"""
 
         try:
             resp = self.client.chat.completions.create(
                 model=self.config.openai_model,
                 messages=[
-                    {"role": "system", "content": "You are CodeGhost's debugging AI. Output strict JSON."},
+                    {"role": "system", "content": "You are CodeGhost's autonomous independent validation reviewer. Be rigorous, objective, and return strict JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            if self.state_store and resp.usage:
+                self.state_store.record_usage(
+                    prompt_tokens=resp.usage.prompt_tokens,
+                    completion_tokens=resp.usage.completion_tokens,
+                    cost_estimate=(resp.usage.prompt_tokens * 0.000005) + (resp.usage.completion_tokens * 0.000015),
+                )
+
+            raw_text = resp.choices[0].message.content or "{}"
+            data = json.loads(raw_text)
+
+            # Strict validation of parsed response
+            verdict_raw = str(data.get("verdict", "")).strip().upper()
+            if verdict_raw not in ("APPROVED", "CHANGES_REQUESTED"):
+                return PhaseReviewVerdict(
+                    verdict="CHANGES_REQUESTED",
+                    score=float(data.get("score", 0.0)),
+                    is_valid=False,
+                    error_message=f"Invalid review verdict received: '{verdict_raw}'. Must be APPROVED or CHANGES_REQUESTED.",
+                    raw_response=raw_text,
+                )
+
+            findings = []
+            for f in data.get("findings", []):
+                findings.append(
+                    ReviewFinding(
+                        severity=str(f.get("severity", "MEDIUM")).upper(),
+                        category=str(f.get("category", "CORRECTNESS")).upper(),
+                        description=f.get("description", ""),
+                        evidence=f.get("evidence", ""),
+                        suggested_fix=f.get("suggested_fix", ""),
+                    )
+                )
+
+            # Safety gate: If any finding is CRITICAL or HIGH, verdict cannot be APPROVED
+            has_critical = any(f.severity in ("CRITICAL", "HIGH") for f in findings)
+            final_verdict = "CHANGES_REQUESTED" if has_critical else verdict_raw
+
+            return PhaseReviewVerdict(
+                verdict=final_verdict,
+                score=float(data.get("score", 7.0 if final_verdict == "APPROVED" else 4.0)),
+                acceptance_criteria_assessment=data.get("acceptance_criteria_assessment", {}),
+                findings=findings,
+                required_fixes=data.get("required_fixes", []),
+                remaining_risks=data.get("remaining_risks", []),
+                raw_response=raw_text,
+                is_valid=True,
+            )
+        except Exception as e:
+            return PhaseReviewVerdict(
+                verdict="CHANGES_REQUESTED",
+                score=0.0,
+                is_valid=False,
+                error_message=f"Review API exception: {self.config.redact(str(e))}",
+            )
+
+    def diagnose_and_repair(
+        self,
+        task_description: str,
+        command: str = "",
+        error_output: str = "",
+        findings: Optional[List[str]] = None,
+        target_files: Optional[List[str]] = None,
+    ) -> RepairProposal:
+        """Diagnose a command failure or review rejection and propose a concrete repair action."""
+        if not self.client or not self.config.has_api_key:
+            return RepairProposal(
+                root_cause="Automated offline diagnosis: inspect error output and rerun test.",
+                suggested_commands=[command] if command else [],
+                proposed_files=target_files or [],
+            )
+
+        context_findings = "\n".join(f"- {f}" for f in (findings or []))
+        prompt = f"""Task / Phase Action '{task_description}' requires repair.
+Command: {self.config.redact(command)}
+Error / Review Output:
+{self.config.redact(error_output[:2500])}
+
+Specific Findings to Address:
+{self.config.redact(context_findings or 'None provided')}
+
+Target Files:
+{json.dumps(target_files or [])}
+
+Analyze the issues, determine root cause, and propose safe, targeted text replacements and commands to verify the fix.
+Return ONLY valid JSON with this schema:
+{{
+  "root_cause": "concise explanation",
+  "proposed_files": ["files to update"],
+  "replacements": [
+    {{
+      "file_path": "path/to/file",
+      "target": "exact string to replace",
+      "replacement": "replacement text"
+    }}
+  ],
+  "suggested_commands": ["commands to run to verify fix"]
+}}"""
+
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.config.openai_model,
+                messages=[
+                    {"role": "system", "content": "You are CodeGhost's debugging AI. Output strict JSON with safe, contiguous text replacements."},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
@@ -126,12 +308,15 @@ Return ONLY valid JSON with schema:
             data = json.loads(resp.choices[0].message.content or "{}")
             return RepairProposal(
                 root_cause=data.get("root_cause", "Unspecified error"),
-                suggested_commands=data.get("suggested_commands", [command]),
+                proposed_files=data.get("proposed_files", target_files or []),
+                suggested_commands=data.get("suggested_commands", [command] if command else []),
+                replacements=data.get("replacements", []),
             )
         except Exception as e:
             return RepairProposal(
                 root_cause=f"Diagnosis API error: {self.config.redact(str(e))}",
-                suggested_commands=[command],
+                suggested_commands=[command] if command else [],
+                proposed_files=target_files or [],
             )
 
     def _get_deterministic_phase_plan(self, phase_id: str) -> List[PlannedTask]:

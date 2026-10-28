@@ -20,7 +20,7 @@ collecting ... collected 2 items
 tests/integration/test_end_to_end.py::test_e2e_history_mining PASSED     [ 50%]
 tests/integration/test_end_to_end.py::test_e2e_autonomous_cycle PASSED   [100%]
 
-============================= 2 passed in 12.20s ==============================
+============================= 2 passed in 12.84s ==============================
 
 
 ```

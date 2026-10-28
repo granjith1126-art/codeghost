@@ -42,6 +42,7 @@ class OrchestrationReporter:
         phase_table.add_column("Phase", style="cyan")
         phase_table.add_column("Title", style="bold")
         phase_table.add_column("Status", style="bold")
+        phase_table.add_column("Review", style="italic")
         phase_table.add_column("Artifacts", style="dim")
 
         for pid, p in state.phases.items():
@@ -53,8 +54,13 @@ class OrchestrationReporter:
                 else "[magenta]BLOCKED[/magenta]" if p.status == "BLOCKED"
                 else "[dim]PENDING[/dim]"
             )
+            review_display = (
+                "[green]APPROVED[/green]" if getattr(p, "review_verdict", None) == "APPROVED"
+                else f"[yellow]{p.review_verdict}[/yellow]" if getattr(p, "review_verdict", None)
+                else "-"
+            )
             art_summary = ", ".join([a.split("/")[-1] for a in p.artifacts]) if p.artifacts else "-"
-            phase_table.add_row(pid.replace("_", " ").upper(), p.title, status_style, art_summary)
+            phase_table.add_row(pid.replace("_", " ").upper(), p.title, status_style, review_display, art_summary)
 
         console.print(phase_table)
         console.print()
