@@ -70,6 +70,46 @@ def compute_pr_auc(y_true: np.ndarray, y_prob: np.ndarray) -> Optional[float]:
     return float(area)
 
 
+def find_optimal_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    criterion: str = "f1",
+    min_recall: float = 0.80,
+) -> Tuple[float, float]:
+    """Find the optimal decision threshold that maximizes F1 or minimizes FPR subject to min_recall."""
+    if len(y_true) == 0:
+        return 0.50, 0.0
+
+    thresholds = np.linspace(0.10, 0.95, 86)
+    best_thresh = 0.50
+    best_score = -1.0
+
+    for t in thresholds:
+        y_pred = (y_prob >= t).astype(int)
+        tp = np.sum((y_true == 1) & (y_pred == 1))
+        fp = np.sum((y_true == 0) & (y_pred == 1))
+        fn = np.sum((y_true == 1) & (y_pred == 0))
+        tn = np.sum((y_true == 0) & (y_pred == 0))
+
+        prec = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        rec = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        f1 = float(2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
+        fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+
+        if criterion == "f1":
+            if f1 > best_score:
+                best_score = f1
+                best_thresh = float(t)
+        elif criterion == "min_fpr":
+            if rec >= min_recall:
+                score = 1.0 - fpr
+                if score > best_score:
+                    best_score = score
+                    best_thresh = float(t)
+
+    return round(best_thresh, 3), round(best_score, 4)
+
+
 class RiskEvaluator:
     """Evaluates risk scoring models on test or validation splits."""
 

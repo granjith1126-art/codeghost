@@ -320,5 +320,7 @@ pytest tests/ -q
 - [x] **Milestone 5**: LLM Reasoning & Explainability (Preserving retrieved history & feature evidence)
 - [x] **Milestone 6**: Automated Fix Generation & Test Sandbox Execution
 - [x] **Milestone 7**: GitHub PR Creation & Human-in-the-Loop Review
+- [x] **Milestone 8**: Autonomous AI Orchestration & Validation (Phases 1-10)
+- [x] **Milestone 9**: AST Semantic Diff Filtering & Risk Threshold Calibration
 
 

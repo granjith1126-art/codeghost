@@ -8,6 +8,7 @@ from typing import Callable, List, Optional
 from backend.history.bug_detector import BugDetector
 from backend.history.commit_miner import CommitMiner
 from backend.history.function_matcher import FunctionMatcher
+from backend.history.semantic_diff import ASTSemanticDiffAnalyzer
 from backend.ingestion.repo import RepoContext, RepositoryManager
 from backend.models.schemas import (
     BugFixClassification,
@@ -29,6 +30,7 @@ class HistoryExtractor:
         repo_manager: Optional[RepositoryManager] = None,
         bug_detector: Optional[BugDetector] = None,
         function_matcher: Optional[FunctionMatcher] = None,
+        semantic_analyzer: Optional[ASTSemanticDiffAnalyzer] = None,
     ):
         self.repo_manager = repo_manager or RepositoryManager(base_storage_dir=base_storage_dir)
         self.base_storage_dir = self.repo_manager.base_storage_dir
@@ -45,6 +47,7 @@ class HistoryExtractor:
 
         self.bug_detector = bug_detector or BugDetector()
         self.function_matcher = function_matcher or FunctionMatcher()
+        self.semantic_analyzer = semantic_analyzer or ASTSemanticDiffAnalyzer()
 
     def extract_history(
         self,
@@ -56,6 +59,7 @@ class HistoryExtractor:
         raw_commits_path: Optional[Path] = None,
         processed_pairs_path: Optional[Path] = None,
         process_uncertain: bool = False,
+        filter_non_semantic: bool = False,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> HistoryExtractionSummary:
         """
@@ -108,6 +112,7 @@ class HistoryExtractor:
         files_changed_total = 0
         functions_changed_total = 0
         pairs_extracted = 0
+        non_semantic_filtered = 0
         failures = 0
 
         # Open file handles for streaming output
@@ -195,6 +200,24 @@ class HistoryExtractor:
                         )
 
                         for pair in pairs:
+                            # Analyze AST semantic change
+                            try:
+                                sem_res = self.semantic_analyzer.analyze(
+                                    pair.buggy_code, pair.fixed_code, language=pair.language
+                                )
+                                pair.semantic_classification = sem_res.change_type
+                                if filter_non_semantic and not sem_res.is_semantic:
+                                    non_semantic_filtered += 1
+                                    logger.debug(
+                                        "Filtering out non-semantic pair %s in %s: %s",
+                                        pair.function_name,
+                                        commit_record.commit_sha,
+                                        sem_res.change_type,
+                                    )
+                                    continue
+                            except Exception:
+                                pass
+
                             proc_f.write(pair.model_dump_json() + "\n")
                             pairs_extracted += 1
                             functions_changed_total += 1
@@ -211,11 +234,12 @@ class HistoryExtractor:
 
         logger.info(
             "Historical extraction finished: %d commits scanned (%d bug candidates, %d uncertain), "
-            "%d bug-fix pairs extracted (%d failures). Saved to %s and %s",
+            "%d bug-fix pairs extracted (%d non-semantic filtered, %d failures). Saved to %s and %s",
             commits_scanned,
             bug_candidates,
             uncertain_count,
             pairs_extracted,
+            non_semantic_filtered,
             failures,
             raw_commits_path,
             processed_pairs_path,
@@ -230,6 +254,7 @@ class HistoryExtractor:
             files_changed=files_changed_total,
             functions_changed=functions_changed_total,
             bug_fix_pairs_extracted=pairs_extracted,
+            non_semantic_pairs_filtered=non_semantic_filtered,
             extraction_failures=failures,
             raw_commits_file=str(raw_commits_path),
             processed_pairs_file=str(processed_pairs_path),

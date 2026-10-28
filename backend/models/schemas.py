@@ -133,6 +133,7 @@ class BugFixPair(BaseModel):
     detector_score: float = Field(..., description="Heuristic bug detector confidence score")
     detector_signals: List[str] = Field(default_factory=list, description="Signals matched in the commit message")
     detector_classification: str = Field(..., description="Heuristic classification")
+    semantic_classification: Optional[str] = Field(None, description="AST semantic classification (SEMANTIC_CODE_CHANGE, COMMENT_ONLY, etc.)")
     extraction_status: str = Field("success", description="Extraction status (success, partial, unchanged)")
     error_message: Optional[str] = Field(None, description="Error message if extraction had warnings")
 
@@ -149,6 +150,7 @@ class HistoryExtractionSummary(BaseModel):
     files_changed: int = 0
     functions_changed: int = 0
     bug_fix_pairs_extracted: int = 0
+    non_semantic_pairs_filtered: int = 0
     extraction_failures: int = 0
     raw_commits_file: Optional[str] = None
     processed_pairs_file: Optional[str] = None

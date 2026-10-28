@@ -416,3 +416,74 @@ class LocalEvidenceReviewer:
 
         if not final_rep.exists():
             findings.append(ReviewFinding(severity="CRITICAL", category="COMPLIANCE", description="milestone_8_final_report.md missing", suggested_fix="Synthesize final validation report"))
+
+    def _review_phase_9_1(self, files: List[str], findings: List[ReviewFinding], criteria: Dict[str, str], risks: List[str]) -> None:
+        sem_file = self.project_root / "backend" / "history" / "semantic_diff.py"
+        test_file = self.project_root / "tests" / "test_semantic_diff.py"
+
+        criteria["semantic_diff_component"] = "MET" if sem_file.exists() else "UNMET"
+        criteria["semantic_diff_tests"] = "MET" if test_file.exists() else "UNMET"
+
+        if not sem_file.exists():
+            findings.append(ReviewFinding(severity="CRITICAL", category="COMPLIANCE", description="semantic_diff.py missing", suggested_fix="Implement ASTSemanticDiffAnalyzer"))
+            return
+
+        text = sem_file.read_text(encoding="utf-8", errors="replace")
+        has_types = all(t in text for t in ("COMMENT_ONLY", "DOCSTRING_ONLY", "FORMATTING_ONLY", "SEMANTIC_CODE_CHANGE"))
+        criteria["classification_types_defined"] = "MET" if has_types else "UNMET"
+        if not has_types:
+            findings.append(ReviewFinding(severity="HIGH", category="CORRECTNESS", description="semantic_diff.py missing required classification categories", suggested_fix="Define all change types"))
+
+    def _review_phase_9_2(self, files: List[str], findings: List[ReviewFinding], criteria: Dict[str, str], risks: List[str]) -> None:
+        eval_file = self.project_root / "backend" / "risk" / "evaluator.py"
+        model_file = self.project_root / "backend" / "risk" / "baseline_model.py"
+        test_file = self.project_root / "tests" / "test_risk_calibration.py"
+
+        criteria["evaluator_exists"] = "MET" if eval_file.exists() else "UNMET"
+        criteria["model_exists"] = "MET" if model_file.exists() else "UNMET"
+        criteria["test_exists"] = "MET" if test_file.exists() else "UNMET"
+
+        if eval_file.exists():
+            text = eval_file.read_text(encoding="utf-8", errors="replace")
+            has_fn = "find_optimal_threshold" in text
+            criteria["optimal_threshold_algorithm"] = "MET" if has_fn else "UNMET"
+            if not has_fn:
+                findings.append(ReviewFinding(severity="CRITICAL", category="CORRECTNESS", description="find_optimal_threshold missing from evaluator.py", suggested_fix="Implement find_optimal_threshold"))
+
+        if model_file.exists():
+            m_text = model_file.read_text(encoding="utf-8", errors="replace")
+            has_cal = "calibrate_threshold" in m_text and "optimal_threshold" in m_text
+            criteria["model_calibration_method"] = "MET" if has_cal else "UNMET"
+            if not has_cal:
+                findings.append(ReviewFinding(severity="HIGH", category="CORRECTNESS", description="calibrate_threshold missing from BaselineRiskModel", suggested_fix="Add calibrate_threshold method"))
+
+    def _review_phase_9_3(self, files: List[str], findings: List[ReviewFinding], criteria: Dict[str, str], risks: List[str]) -> None:
+        extractor_file = self.project_root / "backend" / "history" / "extractor.py"
+        main_file = self.project_root / "backend" / "main.py"
+
+        criteria["extractor_exists"] = "MET" if extractor_file.exists() else "UNMET"
+        criteria["main_cli_exists"] = "MET" if main_file.exists() else "UNMET"
+
+        if extractor_file.exists():
+            e_text = extractor_file.read_text(encoding="utf-8", errors="replace")
+            has_flag = "filter_non_semantic" in e_text and "semantic_analyzer" in e_text
+            criteria["extractor_filtering_support"] = "MET" if has_flag else "UNMET"
+            if not has_flag:
+                findings.append(ReviewFinding(severity="HIGH", category="CORRECTNESS", description="HistoryExtractor missing filter_non_semantic integration", suggested_fix="Connect semantic_analyzer into HistoryExtractor"))
+
+    def _review_phase_9_4(self, files: List[str], findings: List[ReviewFinding], criteria: Dict[str, str], risks: List[str]) -> None:
+        report_file = self.project_root / "reports" / "validation" / "milestone_9_report.md"
+        readme_file = self.project_root / "README.md"
+
+        criteria["m9_report_exists"] = "MET" if report_file.exists() else "UNMET"
+        criteria["readme_updated"] = "MET" if readme_file.exists() else "UNMET"
+
+        if not report_file.exists():
+            findings.append(ReviewFinding(severity="CRITICAL", category="COMPLIANCE", description="reports/validation/milestone_9_report.md missing", suggested_fix="Generate Milestone 9 report"))
+
+        if readme_file.exists():
+            r_text = readme_file.read_text(encoding="utf-8", errors="replace")
+            has_m9 = "Milestone 9" in r_text
+            criteria["readme_reflects_m9"] = "MET" if has_m9 else "UNMET"
+            if not has_m9:
+                findings.append(ReviewFinding(severity="HIGH", category="DOCUMENTATION", description="README.md roadmap missing Milestone 9 entry", suggested_fix="Update README.md roadmap"))

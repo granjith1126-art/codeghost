@@ -289,6 +289,7 @@ class BaselineRiskModel:
         self.feature_extractor = CodeRiskFeatureExtractor()
         self.feature_names = FEATURE_NAMES
         self.is_fitted = False
+        self.optimal_threshold: float = 0.5
 
         if self.model_type in ("logistic_regression", "lr"):
             self.model = NumpyLogisticRegression(random_state=self.random_state)
@@ -337,14 +338,15 @@ class BaselineRiskModel:
         self,
         example: RiskExample,
         historical_stats: Optional[Dict[str, Any]] = None,
-        decision_threshold: float = 0.5,
+        decision_threshold: Optional[float] = None,
     ) -> RiskPrediction:
+        thresh = decision_threshold if decision_threshold is not None else getattr(self, "optimal_threshold", 0.5)
         feat_dict = self.feature_extractor.extract_from_example(example, historical_stats=historical_stats)
         X_vec = np.array([self.feature_extractor.features_to_vector(feat_dict)], dtype=np.float32)
         prob = float(self.predict_proba(X_vec)[0])
         score = map_probability_to_score(prob)
         category = self.thresholds.categorize(score)
-        is_risky = prob >= decision_threshold
+        is_risky = prob >= thresh
 
         feature_importances = self.get_feature_importances()
 
@@ -377,8 +379,9 @@ class BaselineRiskModel:
         language: str = "python",
         retrieved_matches: Optional[List[RetrievedMatch]] = None,
         historical_stats: Optional[Dict[str, Any]] = None,
-        decision_threshold: float = 0.5,
+        decision_threshold: Optional[float] = None,
     ) -> RiskPrediction:
+        thresh = decision_threshold if decision_threshold is not None else getattr(self, "optimal_threshold", 0.5)
         retrieved_matches = retrieved_matches or []
         feat_dict = self.feature_extractor.extract_features(
             code=code,
@@ -392,7 +395,7 @@ class BaselineRiskModel:
         prob = float(self.predict_proba(X_vec)[0])
         score = map_probability_to_score(prob)
         category = self.thresholds.categorize(score)
-        is_risky = prob >= decision_threshold
+        is_risky = prob >= thresh
 
         feature_importances = self.get_feature_importances()
         sims = [m.similarity_score for m in retrieved_matches]
@@ -415,6 +418,23 @@ class BaselineRiskModel:
             },
             reasoning_summary=f"Predicted risk score {score}/10 ({category.value}) using {self.name}.",
         )
+
+    def calibrate_threshold(
+        self,
+        val_examples: List[RiskExample],
+        criterion: str = "f1",
+        min_recall: float = 0.80,
+    ) -> float:
+        """Calibrate decision threshold on validation examples to optimize F1 or target FPR."""
+        if not val_examples or not self.is_fitted:
+            return self.optimal_threshold
+        from backend.risk.evaluator import find_optimal_threshold
+        X_val, y_val, _ = self.feature_extractor.extract_dataset_matrix(val_examples)
+        y_prob = self.predict_proba(X_val)
+        best_t, _ = find_optimal_threshold(y_val, y_prob, criterion=criterion, min_recall=min_recall)
+        self.optimal_threshold = best_t
+        logger.info("Calibrated %s decision threshold on %d validation samples: %.3f (criterion=%s)", self.name, len(val_examples), best_t, criterion)
+        return self.optimal_threshold
 
     def get_feature_importances(self) -> Dict[str, float]:
         if not self.is_fitted:
@@ -445,6 +465,7 @@ class BaselineRiskModel:
             "feature_names": self.feature_names,
             "thresholds": self.thresholds.model_dump(),
             "is_fitted": self.is_fitted,
+            "optimal_threshold": getattr(self, "optimal_threshold", 0.5),
         }
         with open(path, "wb") as f:
             pickle.dump(bundle, f)
@@ -470,5 +491,6 @@ class BaselineRiskModel:
         instance.name = bundle["name"]
         instance.feature_names = bundle["feature_names"]
         instance.is_fitted = bundle["is_fitted"]
+        instance.optimal_threshold = bundle.get("optimal_threshold", 0.5)
         logger.info("Loaded %s model from %s", instance.name, path)
         return instance

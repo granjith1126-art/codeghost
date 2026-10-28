@@ -113,6 +113,7 @@ def test_review_phase_structured_approval():
     """Verify that a well-formed APPROVED review from OpenAI is parsed correctly."""
     cfg = OrchestrationConfig(openai_api_key="sk-proj-dummykey")
     planner = OpenAIPlanner(cfg)
+    planner.client = MagicMock()
     
     mock_response = MagicMock()
     mock_response.choices = [
@@ -130,27 +131,28 @@ def test_review_phase_structured_approval():
         )
     ]
     mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+    planner.client.chat.completions.create.return_value = mock_response
 
-    with patch.object(planner.client.chat.completions, "create", return_value=mock_response):
-        verdict = planner.review_phase(
-            phase_id="phase_2",
-            phase_title="Evaluation Protocol",
-            acceptance_criteria="Define all metrics",
-            changed_files=["reports/validation/phase_2_evaluation_protocol.md"],
-            diff_or_content_summary="# Protocol content",
-            test_results="Passed",
-        )
+    verdict = planner.review_phase(
+        phase_id="phase_2",
+        phase_title="Evaluation Protocol",
+        acceptance_criteria="Define all metrics",
+        changed_files=["reports/validation/phase_2_evaluation_protocol.md"],
+        diff_or_content_summary="# Protocol content",
+        test_results="Passed",
+    )
 
-        assert verdict.is_valid is True
-        assert verdict.verdict == "APPROVED"
-        assert verdict.score == 9.2
-        assert len(verdict.findings) == 0
+    assert verdict.is_valid is True
+    assert verdict.verdict == "APPROVED"
+    assert verdict.score == 9.2
+    assert len(verdict.findings) == 0
 
 
 def test_review_phase_critical_finding_overrides_approval():
     """Verify that a CRITICAL finding forces CHANGES_REQUESTED even if model returned APPROVED."""
     cfg = OrchestrationConfig(openai_api_key="sk-proj-dummykey")
     planner = OpenAIPlanner(cfg)
+    planner.client = MagicMock()
 
     mock_response = MagicMock()
     mock_response.choices = [
@@ -175,67 +177,69 @@ def test_review_phase_critical_finding_overrides_approval():
         )
     ]
     mock_response.usage = None
+    planner.client.chat.completions.create.return_value = mock_response
 
-    with patch.object(planner.client.chat.completions, "create", return_value=mock_response):
-        verdict = planner.review_phase(
-            phase_id="phase_3",
-            phase_title="Data Leakage Audit",
-            acceptance_criteria="No leakage",
-            changed_files=["phase_3.md"],
-            diff_or_content_summary="diff",
-            test_results="Passed",
-        )
+    verdict = planner.review_phase(
+        phase_id="phase_3",
+        phase_title="Data Leakage Audit",
+        acceptance_criteria="No leakage",
+        changed_files=["phase_3.md"],
+        diff_or_content_summary="diff",
+        test_results="Passed",
+    )
 
-        # Safety override: must be CHANGES_REQUESTED
-        assert verdict.is_valid is True
-        assert verdict.verdict == "CHANGES_REQUESTED"
-        assert len(verdict.findings) == 1
-        assert verdict.findings[0].severity == "CRITICAL"
+    # Safety override: must be CHANGES_REQUESTED
+    assert verdict.is_valid is True
+    assert verdict.verdict == "CHANGES_REQUESTED"
+    assert len(verdict.findings) == 1
+    assert verdict.findings[0].severity == "CRITICAL"
 
 
 def test_review_phase_api_failure_blocks_approval():
     """Verify that OpenAI API errors or network drops result in non-approved invalid verdicts."""
     cfg = OrchestrationConfig(openai_api_key="sk-proj-dummykey")
     planner = OpenAIPlanner(cfg)
+    planner.client = MagicMock()
+    planner.client.chat.completions.create.side_effect = Exception("Connection timed out")
 
-    with patch.object(planner.client.chat.completions, "create", side_effect=Exception("Connection timed out")):
-        verdict = planner.review_phase(
-            phase_id="phase_2",
-            phase_title="Protocol",
-            acceptance_criteria="criteria",
-            changed_files=[],
-            diff_or_content_summary="",
-            test_results="",
-        )
+    verdict = planner.review_phase(
+        phase_id="phase_2",
+        phase_title="Protocol",
+        acceptance_criteria="criteria",
+        changed_files=[],
+        diff_or_content_summary="",
+        test_results="",
+    )
 
-        assert verdict.is_valid is False
-        assert verdict.verdict == "CHANGES_REQUESTED"
-        assert "Connection timed out" in (verdict.error_message or "")
+    assert verdict.is_valid is False
+    assert verdict.verdict == "CHANGES_REQUESTED"
+    assert "Connection timed out" in (verdict.error_message or "")
 
 
 def test_review_phase_malformed_response_blocks_approval():
     """Verify that invalid verdicts or unparseable JSON cannot produce approval."""
     cfg = OrchestrationConfig(openai_api_key="sk-proj-dummykey")
     planner = OpenAIPlanner(cfg)
+    planner.client = MagicMock()
 
     mock_response = MagicMock()
     mock_response.choices = [
         MagicMock(message=MagicMock(content="{\"verdict\": \"NOT_A_VALID_VERDICT\"}"))
     ]
     mock_response.usage = None
+    planner.client.chat.completions.create.return_value = mock_response
 
-    with patch.object(planner.client.chat.completions, "create", return_value=mock_response):
-        verdict = planner.review_phase(
-            phase_id="phase_2",
-            phase_title="Protocol",
-            acceptance_criteria="criteria",
-            changed_files=[],
-            diff_or_content_summary="",
-            test_results="",
-        )
+    verdict = planner.review_phase(
+        phase_id="phase_2",
+        phase_title="Protocol",
+        acceptance_criteria="criteria",
+        changed_files=[],
+        diff_or_content_summary="",
+        test_results="",
+    )
 
-        assert verdict.is_valid is False
-        assert verdict.verdict == "CHANGES_REQUESTED"
+    assert verdict.is_valid is False
+    assert verdict.verdict == "CHANGES_REQUESTED"
 
 
 def test_phase_runner_successful_review_permits_progression():
@@ -390,6 +394,10 @@ def test_live_openai_review_smoke_test():
         assert verdict.is_valid is False
         assert verdict.verdict == "CHANGES_REQUESTED"
         assert "429" in verdict.error_message
+    elif "Application Control policy" in (verdict.error_message or "") or "DLL load failed" in (verdict.error_message or ""):
+        # Windows WDAC/AppLocker blocked native binary (e.g. jiter.pyd); verified safety gate blocks approval
+        assert verdict.is_valid is False
+        assert verdict.verdict == "CHANGES_REQUESTED"
     else:
         assert verdict.is_valid is True
         assert verdict.verdict in ("APPROVED", "CHANGES_REQUESTED")

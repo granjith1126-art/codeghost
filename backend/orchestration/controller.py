@@ -34,8 +34,13 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     config = OrchestrationConfig()
+    if str(args.milestone) == "9":
+        state_file = config.reports_dir / "orchestration_state_m9.json"
+    else:
+        state_file = config.state_file
+
     logger = get_orchestration_logger(config=config)
-    state_store = StateStore(config.state_file)
+    state_store = StateStore(state_file)
     reporter = OrchestrationReporter(state_store)
     executor = LocalDirectExecutor(config)
     verifier = TaskVerifier(config, executor)
@@ -49,13 +54,19 @@ def main(argv=None) -> int:
 
     # 2. Report Command
     if args.report:
-        final_rep = config.reports_dir / "milestone_8_final_report.md"
+        rep_name = "milestone_9_report.md" if str(args.milestone) == "9" else "milestone_8_final_report.md"
+        final_rep = config.reports_dir / rep_name
         if final_rep.exists():
             with open(final_rep, "r", encoding="utf-8") as f:
                 print(f.read())
         else:
-            print("Final validation report not yet generated. Run --milestone 8 first.")
+            print(f"Report not yet generated: {rep_name}. Run --milestone {args.milestone} first.")
         return 0
+
+    if str(args.milestone) == "9":
+        all_milestone_phases = ["phase_9_1", "phase_9_2", "phase_9_3", "phase_9_4"]
+    else:
+        all_milestone_phases = [f"phase_{i}" for i in range(2, 11)]
 
     # 3. Dry-Run Check
     if args.dry_run:
@@ -64,7 +75,7 @@ def main(argv=None) -> int:
         print(f"OpenAI Model: {config.openai_model}")
         print(f"Project Root: {config.project_root}")
         
-        target_phases = [args.phase] if args.phase else [f"phase_{i}" for i in range(2, 11)]
+        target_phases = [args.phase] if args.phase else all_milestone_phases
         for pid in target_phases:
             plan = planner.plan_phase(pid, f"Dry-run plan for {pid}")
             print(f"\nPlan for {pid} ({len(plan)} tasks):")
@@ -80,10 +91,13 @@ def main(argv=None) -> int:
         if not next_p:
             print("All phases are already complete! Run --status to inspect results.")
             return 0
-        start_idx = int(next_p.split("_")[-1])
-        phases_to_run = [f"phase_{i}" for i in range(start_idx, 11)]
+        if next_p in all_milestone_phases:
+            start_idx = all_milestone_phases.index(next_p)
+            phases_to_run = all_milestone_phases[start_idx:]
+        else:
+            phases_to_run = [next_p]
     else:
-        phases_to_run = [f"phase_{i}" for i in range(2, 11)]
+        phases_to_run = all_milestone_phases
 
     print(f"Starting CodeGhost Autonomous Orchestrator: Milestone {args.milestone}")
     print(f"Executing Phases: {', '.join(phases_to_run)}")

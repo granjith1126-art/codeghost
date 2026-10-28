@@ -31,7 +31,7 @@ class OrchestrationConfig:
     max_requests: int = 50
     max_total_tokens: int = 250_000
     max_cost_usd: float = 5.00
-    per_command_timeout_seconds: float = 60.0
+    per_command_timeout_seconds: float = 180.0
     max_repair_attempts_per_task: int = 3
     max_review_retries: int = 3
     max_consecutive_failures: int = 3

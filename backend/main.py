@@ -156,6 +156,8 @@ def print_history_report(summary: HistoryExtractionSummary, preview_count: int =
     table.add_row("Files Changed", str(summary.files_changed))
     table.add_row("Functions Changed", str(summary.functions_changed))
     table.add_row("Bug-Fix Pairs Extracted", f"[bold cyan]{summary.bug_fix_pairs_extracted}[/bold cyan]")
+    if summary.non_semantic_pairs_filtered:
+        table.add_row("Non-Semantic Filtered", f"[yellow]{summary.non_semantic_pairs_filtered}[/yellow]")
     table.add_row(
         "Extraction Failures",
         f"[red]{summary.extraction_failures}[/red]" if summary.extraction_failures else "[green]0[/green]",
@@ -630,6 +632,11 @@ def main(argv: Optional[list] = None) -> int:
         help="Classification threshold for positive (risky) prediction",
     )
     parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Calibrate optimal decision threshold on validation split",
+    )
+    parser.add_argument(
         "--rebuild-dataset",
         action="store_true",
         help="Force rebuild of risk dataset splits from raw pairs and units",
@@ -721,6 +728,11 @@ def main(argv: Optional[list] = None) -> int:
         "--process-uncertain",
         action="store_true",
         help="Also attempt bug-fix extraction on UNCERTAIN commits",
+    )
+    parser.add_argument(
+        "--filter-non-semantic",
+        action="store_true",
+        help="Filter out non-semantic candidate pairs (comments, docstrings, formatting) during history extraction",
     )
     parser.add_argument(
         "--cross-repo",
@@ -838,6 +850,7 @@ def main(argv: Optional[list] = None) -> int:
                     branch=args.branch,
                     processed_pairs_path=Path(args.output) if args.output else None,
                     process_uncertain=args.process_uncertain,
+                    filter_non_semantic=args.filter_non_semantic,
                     progress_callback=history_update,
                 )
                 progress.update(task_id, completed=max_commits, description="[bold green]Mining complete!")
@@ -1015,15 +1028,21 @@ def main(argv: Optional[list] = None) -> int:
             console.print(f"[bold cyan]Training Model A: Classical Baseline ({args.baseline_type})...[/bold cyan]")
             baseline = BaselineRiskModel(model_type=args.baseline_type)
             baseline.fit_examples(splits.train)
+            if args.calibrate:
+                opt_thresh = baseline.calibrate_threshold(splits.val, criterion="f1")
+                console.print(f"[green]Calibrated optimal threshold on validation set: {opt_thresh:.3f}[/green]")
             baseline.save(model_save_path)
             console.print(f"[green]Model saved to {model_save_path}[/green]")
 
-            console.print("[cyan]Evaluating Model A on TEST split...[/cyan]")
+            effective_threshold = (
+                baseline.optimal_threshold if args.calibrate else args.decision_threshold
+            )
+            console.print(f"[cyan]Evaluating Model A on TEST split (threshold: {effective_threshold})...[/cyan]")
             test_metrics = evaluator.evaluate_model(
                 baseline,
                 splits.test,
                 split_name="test",
-                decision_threshold=args.decision_threshold,
+                decision_threshold=effective_threshold,
             )
             print_risk_metrics_report(test_metrics)
 

@@ -88,6 +88,16 @@ class StateStore:
             except Exception:
                 pass
         
+        # Initialize default phases
+        if "m9" in str(self.state_file_path).lower():
+            default_phases = {
+                "phase_9_1": PhaseRecord("phase_9_1", "AST Semantic Diff Analyzer", artifacts=["backend/history/semantic_diff.py", "tests/test_semantic_diff.py"]),
+                "phase_9_2": PhaseRecord("phase_9_2", "Threshold Calibration & Optimization", artifacts=["backend/risk/evaluator.py", "tests/test_risk_calibration.py"]),
+                "phase_9_3": PhaseRecord("phase_9_3", "History Extractor Integration", artifacts=["backend/history/extractor.py", "backend/main.py"]),
+                "phase_9_4": PhaseRecord("phase_9_4", "Milestone 9 Validation & Final Report", artifacts=["reports/validation/milestone_9_report.md", "README.md"]),
+            }
+            return WorkflowState(milestone="Milestone 9", active_phase="phase_9_1", phases=default_phases)
+
         # Initialize default Milestone 8 phases (1 through 10)
         default_phases = {
             "phase_1": PhaseRecord("phase_1", "Repository Baseline & Audit", status="PASSED", review_verdict="APPROVED", artifacts=["reports/validation/initial_audit.md"]),
@@ -157,11 +167,7 @@ class StateStore:
 
     def get_next_incomplete_phase(self) -> Optional[str]:
         """Find the earliest phase that is not fully PASSED with an APPROVED review."""
-        ordered = [f"phase_{i}" for i in range(1, 11)]
-        for pid in ordered:
-            p = self.state.phases.get(pid)
-            if not p:
-                return pid
+        for pid, p in self.state.phases.items():
             if p.status not in ("PASSED", "PASSED_WITH_LIMITATIONS"):
                 return pid
             if getattr(p, "review_verdict", None) != "APPROVED":

@@ -397,5 +397,40 @@ Return ONLY valid JSON with this schema:
                     acceptance_criteria="All final validation deliverables exist and summarize all verified findings",
                 ),
             ],
+            "phase_9_1": [
+                PlannedTask(
+                    task_id="p9_1_semantic_diff",
+                    description="Implement and verify Tree-sitter AST semantic diff analyzer to filter non-semantic changes",
+                    command=".venv\\Scripts\\python -m pytest tests/test_semantic_diff.py -v",
+                    target_files=["backend/history/semantic_diff.py", "tests/test_semantic_diff.py"],
+                    acceptance_criteria="All semantic diff tests pass and non-semantic changes correctly identified",
+                ),
+            ],
+            "phase_9_2": [
+                PlannedTask(
+                    task_id="p9_2_threshold_calibration",
+                    description="Implement validation split threshold calibration and false-positive reduction",
+                    command=".venv\\Scripts\\python -m pytest tests/test_risk_calibration.py -v",
+                    target_files=["backend/risk/evaluator.py", "backend/risk/baseline_model.py", "tests/test_risk_calibration.py"],
+                    acceptance_criteria="Optimal threshold calibration functions pass unit tests",
+                ),
+            ],
+            "phase_9_3": [
+                PlannedTask(
+                    task_id="p9_3_extractor_integration",
+                    description="Integrate AST semantic diff filtering into HistoryExtractor and CLI",
+                    command=".venv\\Scripts\\python -m pytest tests/test_extractor.py tests/test_pipeline.py -v",
+                    target_files=["backend/history/extractor.py", "backend/main.py"],
+                    acceptance_criteria="HistoryExtractor supports filter_non_semantic flag without regressions",
+                ),
+            ],
+            "phase_9_4": [
+                PlannedTask(
+                    task_id="p9_4_validation_report",
+                    description="Synthesize Milestone 9 report, update README roadmap, and run full test suite",
+                    target_files=["reports/validation/milestone_9_report.md", "README.md"],
+                    acceptance_criteria="Milestone 9 report generated and 100% of project tests pass",
+                ),
+            ],
         }
         return plans.get(phase_id, [PlannedTask(task_id=f"{phase_id}_task_1", description=f"Execute {phase_id}")])
